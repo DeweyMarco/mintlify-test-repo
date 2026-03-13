@@ -49,6 +49,7 @@ BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v
 _client = None
 
 MAX_ITERATIONS = 10
+BASH_TIMEOUT = 30  # seconds
 
 
 def _get_client():
@@ -103,7 +104,12 @@ def write(file_path: str, content: str) -> str:
 
 def bash(command: str) -> str:
     """Execute a shell command and return stdout + stderr."""
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True, timeout=BASH_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return f"Error: command timed out after {BASH_TIMEOUT}s: {command}"
     output = result.stdout
     if result.stderr:
         output += "\n" + result.stderr
@@ -228,6 +234,8 @@ def main():
                     result = TOOLS[fn.name](**fn_args)
                 except (KeyError, json.JSONDecodeError, TypeError) as e:
                     result = f"Error: {type(e).__name__}: {e}"
+                except subprocess.TimeoutExpired as e:
+                    result = f"Error: command timed out after {BASH_TIMEOUT}s"
                 except Exception as e:
                     result = f"Error executing {fn.name}: {e}"
 
@@ -249,7 +257,11 @@ def main():
         )
 
     # Print the final response
-    print(chat.choices[0].message.content)
+    final_content = chat.choices[0].message.content
+    if final_content:
+        print(final_content)
+    else:
+        print("Stopped: reached maximum iterations without a final response.")
 
 
 if __name__ == "__main__":

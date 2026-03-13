@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import tempfile
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +18,7 @@ from marco_code import (
     _get_client,
     TOOLS,
     MAX_ITERATIONS,
+    BASH_TIMEOUT,
 )
 
 
@@ -61,6 +63,12 @@ class TestBashTool:
     def test_nonzero_exit_does_not_raise(self):
         result = bash("exit 1")
         assert isinstance(result, str)
+
+    @patch("marco_code.BASH_TIMEOUT", 1)
+    def test_timeout_returns_error_message(self):
+        result = bash("sleep 10")
+        assert "timed out" in result
+        assert "sleep 10" in result
 
 
 # =============================================================================
@@ -230,3 +238,28 @@ class TestAgentLoop:
 
         captured = capsys.readouterr()
         assert "maximum iterations" in captured.err
+        assert "still going" in captured.out
+
+    @patch("marco_code._get_client")
+    def test_max_iterations_with_none_content(self, mock_get_client, capsys):
+        """When loop exhausts and last response has no text content, print fallback."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
+        tool_call = _make_tool_call("bash", {"command": "echo loop"})
+        looping_resp = MagicMock()
+        looping_resp.choices = [_make_choice(
+            content=None,
+            tool_calls=[tool_call],
+            finish_reason="tool_calls",
+        )]
+
+        mock_client.chat.completions.create.return_value = looping_resp
+
+        with patch("sys.argv", ["marco-code", "-p", "loop forever"]):
+            main()
+
+        captured = capsys.readouterr()
+        assert "maximum iterations" in captured.err
+        assert "Stopped" in captured.out
+        assert "None" not in captured.out
